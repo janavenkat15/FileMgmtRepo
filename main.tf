@@ -1,6 +1,6 @@
 # Configure the GitHub Provider
 provider "github" {
-  token = "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"
+  token = ""
 }
 locals {
   # flatten ensures that this local value is a flat list of objects, rather
