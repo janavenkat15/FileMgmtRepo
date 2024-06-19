@@ -1,0 +1,19 @@
+---
+version: 2
+
+updates:
+ - package-ecosystem: "terraform"
+   directory: "/Application/"
+   schedule:
+     interval: "monthly"
+   target-branch: "master"
+   reviewers:
+      - "amalgam-rx/devops"
+
+ - package-ecosystem: "terraform"
+   directory: "/Account/"
+   schedule:
+     interval: "monthly"
+   target-branch: "master"
+   reviewers:
+      - "amalgam-rx/devops"
