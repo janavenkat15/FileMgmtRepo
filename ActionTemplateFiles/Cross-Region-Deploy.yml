@@ -1,0 +1,42 @@
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options:
+#%{ for item in env_level_replace_val}        
+          - ${item.environment}
+#%{ endfor ~}
+
+permissions:
+  id-token: write
+  contents: write
+
+env:
+#%{ for item in env_level_replace_val}
+  ${item.environment}: "${item.dbregions}"
+#%{ endfor ~}
+ 
+jobs:
+
+   Getting-Regions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      matrix: $${{ steps.set-matrix.outputs.matrix }}
+
+    steps:
+      - id: set-matrix
+        run: echo "matrix=$${{ env[format('{0}',inputs.environment)] }}"  >> $GITHUB_OUTPUT
+
+   DeployToRegion:
+      name:  Deploy To Regions in $${{ inputs.environment }}
+      needs: Getting-Regions
+      strategy:
+        matrix: 
+          db_regions: $${{ fromJson(needs.Getting-Regions.outputs.matrix) }}
+      uses: ./.github/workflows/Cross-Countries-Deploy.yml
+      with:
+        deployment_region: $${{ matrix.db_regions }}

@@ -1,0 +1,154 @@
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_environment:
+        required: true
+        type: environment
+  workflow_call:
+    inputs:
+      deployment_environment:
+        required: false
+        type: string
+        default: "${common_replace_val.globalEnvName}"
+
+concurrency:
+  group: $${{ github.workflow }}-$${{ inputs.deployment_environment }}
+
+permissions:
+  id-token: write
+  contents: write
+
+env:
+  ECR_REPOSITORY: "${common_replace_val.ecrRepositoryName}"
+  ECR_ACCOUNT_ID: "110172377334"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  Deploy:
+    name:  Deploy To $${{ inputs.deployment_environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    environment: $${{ inputs.deployment_environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate token for cloning Jenkins script repo
+        id: generate_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: 297386
+          private_key: $${{ secrets.COMMONREPOREADERAPPKEY }}
+          installation_retrieval_payload: amalgam-rx/kibo_jenkinsscript
+
+      - name: Checkout Jenkins script repo
+        uses: actions/checkout@v4
+        with:
+          repository: amalgam-rx/kibo_jenkinsscript
+          token: $${{ steps.generate_token.outputs.token }}
+          path: kibo_jenkinsscript
+
+      - name: Reading property file
+        id: propertyfile
+        uses: RadovanPelka/github-action-json@main
+        with:
+          path: kibo_jenkinsscript/$${{ vars.propertyFileNameWithPath }}
+
+      - name: creating app_config_values json
+        id: create-json
+        uses: jsdaniell/create-json@v1.2.3
+        with:
+          name: "app_config_values.json"
+          json: $${{ steps.propertyfile.outputs.APP_CONFIG_VALUES }}
+
+      - name: app_config_values json to env variables
+        uses: antifree/json-to-variables@v1.2.0
+        with:
+          filename: "app_config_values.json"
+
+      - name: Substitute env variables
+        uses: danielr1996/envsubst-action@1.1.0
+        env:
+          VERSION: $${{github.sha}}
+          ENVIRONMENT: $${{ inputs.deployment_environment }}
+        with:
+          input: ./taskDefs/db-migration.json
+          output: updated_taskDefinition.json
+
+      - name: configure aws credentials for ECR push
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::$${{ env.ECR_ACCOUNT_ID }}:role/github-action-role
+          aws-region: us-east-1
+          mask-aws-account-id: false
+
+      - name: Tagging the image
+        run: |
+          ImageTagTest=$(aws ecr batch-get-image --repository-name $${{ env.ECR_REPOSITORY }} --image-ids imageTag="$${{ inputs.deployment_environment }}-$${{github.sha}}" --output text --query 'images[].imageId[].imageTag')
+          if [[ -z "$ImageTagTest" ]];
+          then
+            echo "Image tags doesn't exists in ECR, Pushing the tags"
+            MANIFEST=$(aws ecr batch-get-image --repository-name $${{ env.ECR_REPOSITORY }} --image-ids imageTag=build-$${{github.sha}} --output text --query 'images[].imageManifest')
+            aws ecr put-image --repository-name $${{ env.ECR_REPOSITORY }} --image-tag $${{ inputs.deployment_environment }}-$${{github.sha}} --image-manifest "$MANIFEST"
+            aws ecr put-image --repository-name $${{ env.ECR_REPOSITORY }} --image-tag latest-$${{ inputs.deployment_environment }} --image-manifest "$MANIFEST"
+          fi
+
+      - name: Update Task Def Image Ref
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ./updated_taskDefinition.json
+          container-name: $${{ env.ECR_REPOSITORY }}
+          image: 110172377334.dkr.ecr.us-east-1.amazonaws.com/$${{ env.ECR_REPOSITORY }}:$${{ inputs.deployment_environment }}-$${{ github.sha }}
+          log-configuration-options:
+            |
+            awslogs-group=$${{ vars.ecsLogGroupName }}
+            awslogs-region=$${{ env.AWS_REGION }}
+            awslogs-stream-prefix=${common_replace_val.tableName}
+
+      - name: Configure AWS credentials for deployer
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: $${{ vars.deployerRoleARN }}
+          aws-region: $${{ env.APP_ENV_AWS_REGION }}
+
+      - name: reading db details from AWS secret manager
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            DB_DETAILS,$${{ vars.dbDetailsFromSecret }}
+          parse-json-secrets: true
+
+      - name: DB Migration
+        id: register-ecs-task
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: $${{ steps.render-task-def.outputs.task-definition }}
+          cluster: $${{ env.APP_ENV_ECS_CLUSTER_NAME }}
+          run-task: true
+          run-task-container-overrides: '[{ "name": "$${{ env.ECR_REPOSITORY }}", "command": ["$${{ env.DB_DETAILS_HOST }}", "$${{ env.DB_DETAILS_USERNAME }}", "$${{ env.DB_DETAILS_PASSWORD }}", "$${{ env.DB_DETAILS_DBNAME }}", "$${{ env.DB_DETAILS_PORT }}", "${common_replace_val.tableName}", "$${{fromJson(vars.containerCommand).dbScriptDirectory}}", "$${{fromJson(vars.containerCommand).missedScriptName}}"] }]'
+          run-task-security-groups: $${{ env.APP_ENV_FARGATE_SECURITY_GROUP }}
+          run-task-subnets: $${{ env.APP_ENV_PRIVATE_SUBNET1 }}
+          wait-for-task-stopped: true
+
+      - name: Get short SHA
+        run: |
+          echo "SHORT_SHA=$${GITHUB_SHA:0:7}" >> $GITHUB_ENV
+
+      - name: Check if tag exists
+        uses: mukunku/tag-exists-action@v1.6.0
+        id: check-tag
+        with: 
+          tag: "deploy__$${{ inputs.deployment_environment }}__$${{ env.SHORT_SHA }}"
+
+      - name: Create Deployment Tag
+        if: steps.check-tag.outputs.exists == 'false'
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: $${{ secrets.GITHUB_TOKEN }}
+          custom_tag: "deploy__$${{ inputs.deployment_environment }}__$${{ env.SHORT_SHA }}"
+          tag_prefix: ""
