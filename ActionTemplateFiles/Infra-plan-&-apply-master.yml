@@ -49,7 +49,7 @@ jobs:
 
   PlanFor${env.environment}:
     needs: PR-Random-Job-Calculator
-    if: ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == 'main') || (github.event_name == 'pull_request' &&  ( needs.PR-Random-Job-Calculator.outputs.RandomNum == ${idx} || contains(needs.PR-Random-Job-Calculator.outputs.PRTitle, '${env.environment}')))
+    if: ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == 'main') || (github.event_name == 'pull_request' &&  (contains(needs.PR-Random-Job-Calculator.outputs.PRTitle, '${env.environment}') || needs.PR-Random-Job-Calculator.outputs.RandomNum == ${idx}))
     uses: ./.github/workflows/Infra-plan.yml
     secrets: inherit
     with:
