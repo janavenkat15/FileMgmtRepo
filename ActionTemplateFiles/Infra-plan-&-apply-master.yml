@@ -2,9 +2,11 @@ on:
   push:
     branches:
       - master
+      - main
   pull_request:
     branches:
       - master
+      - main
   workflow_dispatch:
   schedule:
     - cron: "00 4 * * 2,4"
@@ -15,12 +17,12 @@ permissions:
 
 jobs: 
 
-  Random-Calculation:
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+  PR-Random-Job-Calculator:
     runs-on: ubuntu-latest
 
     env:
       PRNUM: $${{ github.event.number }}
+      ENVCOUNT: ${length(env_level_replace_val)}
 
     outputs:
       RandomNum: $${{ steps.random-num.outputs.Random_Num}}
@@ -28,23 +30,26 @@ jobs:
 
     steps:
 
-      - name: Get Random Num & PRTitle
+      - name: Get Random Num & PRTitle in the event of a PR
         id: random-num
         run: |
-          Envcnt = $((length(env_level_replace_val)))
-          RNum = $((PRNUM%$Envcnt))
-          echo "RNum=$RNum"
-          Random_Num=$((PRNUM%ENVCOUNT))
-          echo "Random_Num=$Random_Num"
-          echo "Random_Num=$Random_Num" >> $GITHUB_OUTPUT
-          echo "PRTitle=$${{ github.event.pull_request.title }}"
-          echo "PRTitle=$PRTitle" >> $GITHUB_OUTPUT
+          GH_Event=$${{ github.event_name }}
+          if [[ $GH_Event == 'pull_request' ]];
+          then
+            Random_Num=$((PRNUM%ENVCOUNT))
+            echo "Random_Num=$Random_Num"
+            echo "Random_Num=$Random_Num" >> $GITHUB_OUTPUT
+            echo "PRTitle=$${{ github.event.pull_request.title }}"
+            echo "PRTitle=$PRTitle" >> $GITHUB_OUTPUT
+          else
+            echo "No Random Calculation needed as this is not a PR"
+          fi
           
 #%{ for idx ,env in env_level_replace_val ~}
 
   PlanFor${env.environment}:
-    needs: Random-Calculation
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref_name == 'master') || github.event_name == 'pull_request' &&  ( needs.Random-Calculation.outputs.RandomNum == ${idx} || contains(needs.Random-Calculation.outputs.PRTitle, '${env.environment}'))
+    needs: PR-Random-Job-Calculator
+    if: ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == 'main') || (github.event_name == 'pull_request' &&  ( needs.PR-Random-Job-Calculator.outputs.RandomNum == ${idx} || contains(needs.PR-Random-Job-Calculator.outputs.PRTitle, '${env.environment}')))
     uses: ./.github/workflows/Infra-plan.yml
     secrets: inherit
     with:
@@ -56,4 +61,18 @@ jobs:
       environment: "${env.environment}"
       vpn-enabled: "${env.vpn-enabled}"
 
+  # ApplyFor${env.environment}:
+  #   needs: PlanFor${env.environment}
+  #   if: $${{!cancelled() && (needs.PlanFor${env.environment}.outputs.TFPlanExitCode == 2) && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref_name == 'master') }}
+  #   uses: ./.github/workflows/Infra-apply.yml
+  #   secrets: inherit
+  #   with:
+  #     account-id: "${env.account-id}"
+  #     aws-region: "${env.aws-region}"
+  #     working-directory: "${common_replace_val.working-directory}"
+  #     var-file: "${env.var-file}"
+  #     backend-file: "${env.backend-file}"
+  #     environment: "${env.environment}"
+  #     vpn-enabled: "${env.vpn-enabled}"
+      
 #%{ endfor ~}
