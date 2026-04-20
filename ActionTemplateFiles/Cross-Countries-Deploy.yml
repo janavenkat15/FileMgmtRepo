@@ -1,0 +1,50 @@
+on:
+  workflow_call:
+    inputs:
+      deployment_region:
+        type: string
+  workflow_dispatch:
+    inputs:
+      deployment_region:
+        type: choice
+        options:
+#%{ for item in env_level_replace_val} 
+          - ${item.dbregion}
+#%{ endfor ~}
+
+
+permissions:
+  id-token: write
+  contents: write
+
+env:
+#%{ for item in env_level_replace_val}
+  ${item.dbregion}: "${item.dbcountries}"
+#%{ endfor ~}
+ 
+jobs:
+
+   Getting-Countries:
+    name:  Getting Countries in $${{ inputs.deployment_region }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      matrix: $${{ steps.set-matrix.outputs.matrix }}
+
+    steps:
+      - id: set-matrix
+        run: echo "matrix=$${{ env[format('{0}',inputs.deployment_region)] }}"  >> $GITHUB_OUTPUT
+
+   DeployToCountries:
+      name:  Deploy To Countries in $${{ inputs.deployment_region }}
+      needs: Getting-Countries     
+      strategy:
+        fail-fast: false
+        matrix: 
+          db_countries: $${{ fromJson(needs.Getting-Countries.outputs.matrix) }}
+      uses: ./.github/workflows/DBMigration-Deployer.yml
+      secrets: inherit
+      with:
+        deployment_environment: $${{ matrix.db_countries }}

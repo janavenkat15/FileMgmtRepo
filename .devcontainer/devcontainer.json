@@ -1,0 +1,44 @@
+{
+	"name": "GitTF Devcontainer",
+	// Refers to Dockerfile to install Terraform.
+	"build": {
+		"dockerfile": "Dockerfile",
+		"context": "..",
+		"args": {
+			"TERRAFORM_VERSION": "1.7.0" // specify the TF version to be installed here
+		}
+	},
+	// Installs extension for terraform
+	"extensions": [
+		"HashiCorp.terraform"
+	],
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"[terraform]": {
+					"editor.defaultFormatter": "hashicorp.terraform",
+					"editor.formatOnSave": false,
+					"editor.formatOnSaveMode": "file"
+				},
+				"[terraform-vars]": {
+					"editor.defaultFormatter": "hashicorp.terraform",
+					"editor.formatOnSave": false,
+					"editor.formatOnSaveMode": "file"
+				}
+			}
+		}
+	},
+
+	// To install github cli
+	"features": {
+		"github-cli": "latest",
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"docker-from-docker": {
+            "version": "latest",
+            "moby": true,
+            "dockerDashComposeVersion": "v1"
+        }
+	},
+	// Sets the default path to open once container starts
+	"workspaceFolder": "/workspaces"
+}
