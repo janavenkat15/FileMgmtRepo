@@ -34,13 +34,13 @@ on:
     outputs:
       TFPlanExitCode:
         value: $${{ jobs.plan.outputs.TFPlanExitCode }}
-      
+
 permissions:
   id-token: write
   contents: read
 
 env:
-  TERRAFORM_VERSION: 1.7.0
+  TERRAFORM_VERSION: 1.11.4
   TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE: true
   TF_PLUGIN_CACHE_DIR: $${{ github.workspace }}/.terraform.d/plugin-cache
   DD_API_KEY: $${{ secrets.DD_API_KEY }}
@@ -50,6 +50,7 @@ env:
   TF_VAR_uptime_token: $${{ secrets.uptime_api_token }}
   TF_VAR_openvpn_license_key: $${{ secrets.openvpn_license_key }}
   TF_VAR_rmqbindpw: $${{ secrets.RMQ_BIND_PWD }}
+  TF_VAR_rmqbindpassword: $${{ secrets.BINDKEYPWD }}
   SONARQUBE_TOKEN: $${{ secrets.SONARADMINTOKEN }}
 
 jobs:
@@ -65,13 +66,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: Repo
 
+      - name: Install OpenVPN
+        if: $${{ inputs.vpn-enabled == 'true' }}
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: openvpn openvpn-systemd-resolved
+
       - name: Generate token
         id: generate_token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v2
         with:
           app-id: $${{ inputs.github-app-id }}
           private-key: $${{ secrets[format('{0}', inputs.github-app-key-name)] }}
@@ -80,12 +87,12 @@ jobs:
       - name: generating date string for key
         id: get-date
         run: |
-           echo "date=$(date -dmonday +%Y%m%d)" >> $GITHUB_OUTPUT
-           echo "GITHUB_TOKEN=$${{ steps.generate_token.outputs.token }}" >> $GITHUB_ENV
+          echo "date=$(date -dmonday +%Y%m%d)" >> $GITHUB_OUTPUT
+          echo "GITHUB_TOKEN=$${{ steps.generate_token.outputs.token }}" >> $GITHUB_ENV
         shell: bash
 
       - name: Checkout common infra
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: amalgam-rx/common-infra
           token: $${{ steps.generate_token.outputs.token }}
@@ -105,10 +112,9 @@ jobs:
         with:
           path: $${{ env.TF_PLUGIN_CACHE_DIR }}
           key: $${{ runner.os }}-terraform-$${{ inputs.working-directory }}-$${{ steps.get-date.outputs.date }}
-          restore-keys: $${{ runner.OS }}-terraform-$${{ inputs.working-directory }}-
 
       - name: configure aws credentials for planner
-        uses: aws-actions/configure-aws-credentials@v4.0.1
+        uses: aws-actions/configure-aws-credentials@v5.0.0
         with:
           role-to-assume: arn:aws:iam::$${{ inputs.account-id }}:role/githubActionsPlanner
           aws-region: $${{ inputs.aws-region }}
@@ -119,24 +125,19 @@ jobs:
         env:
           TF_CLI_ARGS_init: "-backend-config=$${{ inputs.backend-file }}"
 
-      - name: Install OpenVPN
-        if : $${{ inputs.vpn-enabled == 'true' }}
-        run: |
-          sudo apt install -y openvpn openvpn-systemd-resolved
-
       - name: Get ovpn secrets from secrets manager
-        if : $${{ inputs.vpn-enabled == 'true' }}
+        if: $${{ inputs.vpn-enabled == 'true' }}
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
           secret-ids: |
             OVPN_PWD,/openvpn/github_actions_user_password
             OVPN_CONFIG_FILE,/openvpn/config_file_content
-        env: 
+        env:
           AWS_REGION: "us-east-1"
           AWS_DEFAULT_REGION: "us-east-1"
 
       - name: Decoding and writing ovpn file
-        if : $${{ inputs.vpn-enabled == 'true' }}
+        if: $${{ inputs.vpn-enabled == 'true' }}
         uses: mobiledevops/secret-to-file-action@v1
         with:
           base64-encoded-secret: $${{ env.OVPN_CONFIG_FILE }}
@@ -144,7 +145,7 @@ jobs:
           working-directory: /tmp
 
       - name: Connect to VPN
-        if : $${{ inputs.vpn-enabled == 'true' }}
+        if: $${{ inputs.vpn-enabled == 'true' }}
         uses: "kota65535/github-openvpn-connect-action@v3.1.0"
         with:
           config_file: "/tmp/profile.ovpn"
@@ -169,13 +170,22 @@ jobs:
           exit 1
 
       - name: Terraform Save Output
-        if: steps.plan.outcome == 'success' && ($${{ steps.plan.outputs.TFPlanExitCode == 2 }} || $${{ steps.plan.outputs.TFPlanExitCode == 0 }})
+        if: steps.plan.outcome == 'success' && steps.plan.outputs.TFPlanExitCode == 2
         run: |
           terraform show -no-color "/tmp/$${{ github.sha }}-$${{inputs.environment}}-infra-plan" > /tmp/$${{inputs.environment}}-infra-plan.txt
-          terraform output -no-color > /tmp/$${{ github.sha }}-$${{inputs.environment}}-output-from-plan.txt
+
+      - name: Adding TF Output to summary
+        if: steps.plan.outcome == 'success' && steps.plan.outputs.TFPlanExitCode == 0
+        run: |
+          terraform output -no-color > /tmp/$${{ github.sha }}-$${{inputs.environment}}-output.txt
+          echo "<details><summary><h3>Expand for Terraform full output</summary></h3>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```tf' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/$${{ github.sha }}-$${{inputs.environment}}-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: archiving
-        if: steps.plan.outcome == 'success' && $${{ steps.plan.outputs.TFPlanExitCode == 2 }}
+        if: steps.plan.outcome == 'success' && steps.plan.outputs.TFPlanExitCode == 2
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
@@ -183,4 +193,3 @@ jobs:
           path: |
             /tmp/$${{inputs.environment}}-infra-plan.txt
             /tmp/$${{ github.sha }}-$${{inputs.environment}}-infra-plan
-            /tmp/$${{ github.sha }}-$${{inputs.environment}}-output-from-plan.txt

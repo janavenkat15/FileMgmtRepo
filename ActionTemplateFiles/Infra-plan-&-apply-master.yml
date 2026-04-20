@@ -2,12 +2,23 @@ on:
   push:
     branches:
       - master
-      - main
   pull_request:
     branches:
       - master
-      - main
   workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        required: false
+        default: "All"
+        description: Select the environment
+        options:
+          - All
+#%{ for env in env_level_replace_val ~}
+          
+          - ${env.environment}
+#%{ endfor ~}
+
   schedule:
     - cron: "00 4 * * 2,4"
 
@@ -25,31 +36,22 @@ jobs:
       ENVCOUNT: ${length(env_level_replace_val)}
 
     outputs:
-      RandomNum: $${{ steps.random-num.outputs.Random_Num}}
-      PRTitle: $${{ steps.random-num.outputs.PRTitle}}
+      RandomPlanNumSelected: $${{ steps.random-num.outputs.Random_Num}}
 
     steps:
-
-      - name: Get Random Num & PRTitle in the event of a PR
+      - name: Calculate Random Num in the event of a PR
         id: random-num
+        if: github.event_name == 'pull_request'
         run: |
-          GH_Event=$${{ github.event_name }}
-          if [[ $GH_Event == 'pull_request' ]];
-          then
-            Random_Num=$((PRNUM%ENVCOUNT))
-            echo "Random_Num=$Random_Num"
-            echo "Random_Num=$Random_Num" >> $GITHUB_OUTPUT
-            echo "PRTitle=$${{ github.event.pull_request.title }}"
-            echo "PRTitle=$PRTitle" >> $GITHUB_OUTPUT
-          else
-            echo "No Random Calculation needed as this is not a PR"
-          fi
+          Random_Num=$((PRNUM%ENVCOUNT))
+          echo "Random_Num=$Random_Num"
+          echo "Random_Num=$Random_Num" >> $GITHUB_OUTPUT
           
 #%{ for idx ,env in env_level_replace_val ~}
 
   PlanFor${env.environment}:
     needs: PR-Random-Job-Calculator
-    if: ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == 'main') || (github.event_name == 'pull_request' &&  (contains(needs.PR-Random-Job-Calculator.outputs.PRTitle, '${env.environment}') || needs.PR-Random-Job-Calculator.outputs.RandomNum == ${idx}))
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.environment == '${env.environment}' || inputs.environment == 'All')) || github.event_name == 'schedule' || (github.event_name == 'pull_request' && (needs.PR-Random-Job-Calculator.outputs.RandomPlanNumSelected == ${idx} || contains(github.event.pull_request.title, '${env.environment}')))
     uses: ./.github/workflows/Infra-plan.yml
     secrets: inherit
     with:
@@ -63,7 +65,7 @@ jobs:
 
   # ApplyFor${env.environment}:
   #   needs: PlanFor${env.environment}
-  #   if: $${{!cancelled() && (needs.PlanFor${env.environment}.outputs.TFPlanExitCode == 2) && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref_name == 'master') }}
+  #   if: $${{!cancelled() && (needs.PlanFor${env.environment}.outputs.TFPlanExitCode == 2) && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && (github.ref_name == 'master') }}
   #   uses: ./.github/workflows/Infra-apply.yml
   #   secrets: inherit
   #   with:

@@ -25,6 +25,7 @@ env:
 jobs:
 
    Getting-Countries:
+    name:  Getting Countries in $${{ inputs.deployment_region }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -44,5 +45,6 @@ jobs:
         matrix: 
           db_countries: $${{ fromJson(needs.Getting-Countries.outputs.matrix) }}
       uses: ./.github/workflows/DBMigration-Deployer.yml
+      secrets: inherit
       with:
         deployment_environment: $${{ matrix.db_countries }}

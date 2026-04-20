@@ -1,0 +1,25 @@
+---
+version: 2
+
+updates:
+%{ for item in env_level_replace_val} 
+  - package-ecosystem: "terraform"
+    directory: "${item.directory}"
+    schedule:
+      interval: "monthly"
+    target-branch: "master"
+    reviewers:
+      - "amalgam-rx/devops"
+%{ endfor ~} 
+
+%{ for item in env_level_replace_val}
+%{ if item.ghadirectory != ""}
+  - package-ecosystem: "github-actions"
+    directory: "${item.ghadirectory}"
+    schedule:
+      interval: "monthly"
+    target-branch: "master"
+    reviewers:
+      - "amalgam-rx/devops"
+%{ endif ~}
+%{ endfor ~}

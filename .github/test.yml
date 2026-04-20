@@ -1,0 +1,11 @@
+name: Simple Reusable Workflow
+
+on:
+  workflow_call:  # This makes the workflow reusable
+
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print Hello
+        run: echo "Hello from the reusable workflow!"

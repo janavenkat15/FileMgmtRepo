@@ -1,6 +1,6 @@
 # Configure the GitHub Provider
 provider "github" {
-  token = "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"
+  token = "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"
 }
 
 locals {
@@ -26,6 +26,6 @@ resource "github_repository_file" "create_file" {
   }
   repository          = each.value.repo_name
   file                = each.value.path
-  content             = templatefile("${path.module}/${each.value.file_name}",each.value.value_to_replace)
+  content             = templatefile("${path.module}/${each.value.file_name}", each.value.value_to_replace)
   overwrite_on_create = true
 }
