@@ -1,11 +1,13 @@
-name: Simple Reusable Workflow
+name: Simple Infrastructure Workflow
 
 on:
-  workflow_call:  # This makes the workflow reusable
+  workflow_call:  # This makes the workflow reusable  
+  workflow_dispatch:  # This allows triggering
 
 jobs:
   hello:
     runs-on: ubuntu-latest
     steps:
       - name: Print Hello
-        run: echo "Hello from the reusable workflow!"
+        run: |
+          echo "🚀 Hello from the target workflow!"

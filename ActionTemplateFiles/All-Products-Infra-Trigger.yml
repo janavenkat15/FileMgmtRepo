@@ -1,3 +1,5 @@
+name: Cross-Repository API Trigger
+
 on:
   workflow_dispatch:
     inputs:
@@ -10,17 +12,16 @@ on:
           - All_Products_Account
           - All_Products_Application
 
-permissions:
-  id-token: write
-  contents: read
-
-jobs: 
-
+jobs:
+  trigger-workflows:
+    runs-on: ubuntu-latest
+    steps:
 #%{ for env in env_level_replace_val ~}
-
-  ${env.infrarepo}-Account:
-    if: github.event_name == 'workflow_dispatch' && (inputs.infratype == 'All_Products_Account')
-    uses: janavenkat15/FileMgmtRepo/.github/workflows/test.yml@main
-    secrets: inherit
-
+      - name: ${env.infrarepo}Account
+        if: github.event_name == 'workflow_dispatch' && (inputs.infratype == 'All_Products_Account')
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: token $${{ secrets.REPO_ACCESS_TOKEN }}" \
+            https://api.github.com/repos/janavenkat15/FileMgmtRepo/actions/workflows/test.yml/dispatches
 #%{ endfor ~}
