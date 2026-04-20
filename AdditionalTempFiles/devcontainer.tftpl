@@ -1,0 +1,46 @@
+{
+	"name": "${common_replace_val.repoName} Infra Devcontainer",
+	// Refers to Dockerfile to install Terraform.
+	"build": {
+		"dockerfile": "Dockerfile",
+		"context": "..",
+		"args": {
+			"TERRAFORM_VERSION": "1.11.4" // specify the TF version to be installed here
+		}
+	},
+	// Installs extension for terraform
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"HashiCorp.terraform"
+			],
+			"settings": {
+				"[terraform]": {
+					"editor.defaultFormatter": "hashicorp.terraform",
+					"editor.formatOnSave": true,
+					"editor.formatOnSaveMode": "file"
+				},
+				"[terraform-vars]": {
+					"editor.defaultFormatter": "hashicorp.terraform",
+					"editor.formatOnSave": true,
+					"editor.formatOnSaveMode": "file"
+				}
+			}
+		}
+	},
+	// Container env variable file
+	"runArgs": [
+		"--env-file",
+		".devcontainer/devcontainer.env"
+	],
+	// To install github cli
+	"features": {
+		"github-cli": "latest"
+	},
+	%{ if "${common_replace_val.repoName}" != "common-infra" }
+	// Clones common-infra repo after container is created
+	"postCreateCommand": "git clone https://github.com/amalgam-rx/common-infra /workspaces/common-infra",	
+	%{ endif }
+	// Sets the default path to open once container starts
+	"workspaceFolder": "/workspaces"
+}

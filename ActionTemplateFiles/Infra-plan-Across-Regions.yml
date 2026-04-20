@@ -1,0 +1,47 @@
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options:
+#%{ for item in env_level_replace_val}        
+          - ${item.environment}
+#%{ endfor ~}
+
+permissions:
+  id-token: write
+  contents: write
+
+run-name: "Infra Plan & Apply for Regions in $${{ inputs.environment }}"
+
+env:
+#%{ for item in env_level_replace_val}
+  ${item.environment}: "${item.infraregions}"
+#%{ endfor ~}
+ 
+jobs:
+
+   Getting-Regions:
+    name:  Getting Regions in $${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      matrix: $${{ steps.set-matrix.outputs.matrix }}
+
+    steps:
+      - id: set-matrix
+        run: echo "matrix=$${{ env[format('{0}',inputs.environment)] }}"  >> $GITHUB_OUTPUT
+
+   Infra-Plan-Apply-Across-Regions:
+      name:  Infra Plan & Apply for Regions in $${{ inputs.environment }}
+      needs: Getting-Regions
+      strategy:
+        fail-fast: false
+        matrix: 
+          infra_region: $${{ fromJson(needs.Getting-Regions.outputs.matrix) }}
+      uses: ./.github/workflows/Infra-plan-&-apply-master.yml
+      secrets: inherit
+      with:
+        environment: $${{ matrix.infra_region }}

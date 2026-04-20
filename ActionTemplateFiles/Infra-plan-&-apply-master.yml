@@ -1,0 +1,80 @@
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        required: false
+        default: "All"
+        description: Select the environment
+        options:
+          - All
+#%{ for env in env_level_replace_val ~}
+          
+          - ${env.environment}
+#%{ endfor ~}
+
+  schedule:
+    - cron: "00 4 * * 2,4"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs: 
+
+  PR-Random-Job-Calculator:
+    runs-on: ubuntu-latest
+
+    env:
+      PRNUM: $${{ github.event.number }}
+      ENVCOUNT: ${length(env_level_replace_val)}
+
+    outputs:
+      RandomPlanNumSelected: $${{ steps.random-num.outputs.Random_Num}}
+
+    steps:
+      - name: Calculate Random Num in the event of a PR
+        id: random-num
+        if: github.event_name == 'pull_request'
+        run: |
+          Random_Num=$((PRNUM%ENVCOUNT))
+          echo "Random_Num=$Random_Num"
+          echo "Random_Num=$Random_Num" >> $GITHUB_OUTPUT
+          
+#%{ for idx ,env in env_level_replace_val ~}
+
+  PlanFor${env.environment}:
+    needs: PR-Random-Job-Calculator
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.environment == '${env.environment}' || inputs.environment == 'All')) || github.event_name == 'schedule' || (github.event_name == 'pull_request' && (needs.PR-Random-Job-Calculator.outputs.RandomPlanNumSelected == ${idx} || contains(github.event.pull_request.title, '${env.environment}')))
+    uses: ./.github/workflows/Infra-plan.yml
+    secrets: inherit
+    with:
+      account-id: "${env.account-id}"
+      aws-region: "${env.aws-region}"
+      working-directory: "${common_replace_val.working-directory}"
+      var-file: "${env.var-file}"
+      backend-file: "${env.backend-file}"
+      environment: "${env.environment}"
+      vpn-enabled: "${env.vpn-enabled}"
+
+  # ApplyFor${env.environment}:
+  #   needs: PlanFor${env.environment}
+  #   if: $${{!cancelled() && (needs.PlanFor${env.environment}.outputs.TFPlanExitCode == 2) && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && (github.ref_name == 'master') }}
+  #   uses: ./.github/workflows/Infra-apply.yml
+  #   secrets: inherit
+  #   with:
+  #     account-id: "${env.account-id}"
+  #     aws-region: "${env.aws-region}"
+  #     working-directory: "${common_replace_val.working-directory}"
+  #     var-file: "${env.var-file}"
+  #     backend-file: "${env.backend-file}"
+  #     environment: "${env.environment}"
+  #     vpn-enabled: "${env.vpn-enabled}"
+      
+#%{ endfor ~}

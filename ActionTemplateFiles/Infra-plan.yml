@@ -1,0 +1,195 @@
+on:
+  workflow_call:
+    inputs:
+      account-id:
+        required: true
+        type: string
+      aws-region:
+        required: true
+        type: string
+      working-directory:
+        required: true
+        type: string
+      backend-file:
+        required: true
+        type: string
+      var-file:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      vpn-enabled:
+        required: true
+        type: string
+      github-app-key-name:
+        required: false
+        type: string
+        default: COMMONREPOREADERAPPKEY
+      github-app-id:
+        required: false
+        type: string
+        default: 297386
+
+    outputs:
+      TFPlanExitCode:
+        value: $${{ jobs.plan.outputs.TFPlanExitCode }}
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TERRAFORM_VERSION: 1.11.4
+  TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE: true
+  TF_PLUGIN_CACHE_DIR: $${{ github.workspace }}/.terraform.d/plugin-cache
+  DD_API_KEY: $${{ secrets.DD_API_KEY }}
+  DD_APP_KEY: $${{ secrets.DD_APP_KEY }}
+  OPSGENIE_API_KEY: $${{ secrets.opsgenie_api_key }}
+  TF_VAR_datadog_api_key: $${{ secrets.DD_API_KEY }}
+  TF_VAR_uptime_token: $${{ secrets.uptime_api_token }}
+  TF_VAR_openvpn_license_key: $${{ secrets.openvpn_license_key }}
+  TF_VAR_rmqbindpw: $${{ secrets.RMQ_BIND_PWD }}
+  TF_VAR_rmqbindpassword: $${{ secrets.BINDKEYPWD }}
+  SONARQUBE_TOKEN: $${{ secrets.SONARADMINTOKEN }}
+
+jobs:
+  plan:
+    runs-on: $${{ inputs.vpn-enabled == 'true' && 'Linux-arm-infra' || 'ubuntu-latest' }}
+    defaults:
+      run:
+        working-directory: $${{ inputs.working-directory }}
+    timeout-minutes: 30
+
+    outputs:
+      TFPlanExitCode: $${{ steps.plan.outputs.TFPlanExitCode}}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          path: Repo
+
+      - name: Install OpenVPN
+        if: $${{ inputs.vpn-enabled == 'true' }}
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: openvpn openvpn-systemd-resolved
+
+      - name: Generate token
+        id: generate_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: $${{ inputs.github-app-id }}
+          private-key: $${{ secrets[format('{0}', inputs.github-app-key-name)] }}
+          owner: $${{ github.repository_owner }}
+
+      - name: generating date string for key
+        id: get-date
+        run: |
+          echo "date=$(date -dmonday +%Y%m%d)" >> $GITHUB_OUTPUT
+          echo "GITHUB_TOKEN=$${{ steps.generate_token.outputs.token }}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Checkout common infra
+        uses: actions/checkout@v5
+        with:
+          repository: amalgam-rx/common-infra
+          token: $${{ steps.generate_token.outputs.token }}
+          path: common-infra
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+          terraform_version: $${{ env.TERRAFORM_VERSION }}
+
+      - name: Config Terraform plugin cache
+        run: mkdir --parents $${{ env.TF_PLUGIN_CACHE_DIR }}
+
+      - name: Cache Terraform
+        uses: actions/cache@v4
+        with:
+          path: $${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: $${{ runner.os }}-terraform-$${{ inputs.working-directory }}-$${{ steps.get-date.outputs.date }}
+
+      - name: configure aws credentials for planner
+        uses: aws-actions/configure-aws-credentials@v5.0.0
+        with:
+          role-to-assume: arn:aws:iam::$${{ inputs.account-id }}:role/githubActionsPlanner
+          aws-region: $${{ inputs.aws-region }}
+
+      - name: Terraform Init
+        id: init
+        run: terraform init -input=false -no-color
+        env:
+          TF_CLI_ARGS_init: "-backend-config=$${{ inputs.backend-file }}"
+
+      - name: Get ovpn secrets from secrets manager
+        if: $${{ inputs.vpn-enabled == 'true' }}
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            OVPN_PWD,/openvpn/github_actions_user_password
+            OVPN_CONFIG_FILE,/openvpn/config_file_content
+        env:
+          AWS_REGION: "us-east-1"
+          AWS_DEFAULT_REGION: "us-east-1"
+
+      - name: Decoding and writing ovpn file
+        if: $${{ inputs.vpn-enabled == 'true' }}
+        uses: mobiledevops/secret-to-file-action@v1
+        with:
+          base64-encoded-secret: $${{ env.OVPN_CONFIG_FILE }}
+          filename: "profile.ovpn"
+          working-directory: /tmp
+
+      - name: Connect to VPN
+        if: $${{ inputs.vpn-enabled == 'true' }}
+        uses: "kota65535/github-openvpn-connect-action@v3.1.0"
+        with:
+          config_file: "/tmp/profile.ovpn"
+          echo_config: false
+          username: "github_actions_openvpn_user"
+          password: $${{ env.OVPN_PWD }}
+
+      - name: Terraform Plan
+        id: plan
+        continue-on-error: true
+        run: |
+          set +e
+          terraform plan -no-color -detailed-exitcode -var-file='$${{ inputs.var-file }}' -out='/tmp/$${{ github.sha }}-$${{inputs.environment}}-infra-plan'
+          TFPlanExitCode="$?"
+          echo "TFPlanExitCode=$TFPlanExitCode"
+          echo "TFPlanExitCode=$TFPlanExitCode" >> $GITHUB_OUTPUT
+
+      - name: Tf-plan-Check
+        if: $${{ steps.plan.outputs.TFPlanExitCode == 1 }}
+        run: |
+          echo "Terraform plan Failure...!"
+          exit 1
+
+      - name: Terraform Save Output
+        if: steps.plan.outcome == 'success' && steps.plan.outputs.TFPlanExitCode == 2
+        run: |
+          terraform show -no-color "/tmp/$${{ github.sha }}-$${{inputs.environment}}-infra-plan" > /tmp/$${{inputs.environment}}-infra-plan.txt
+
+      - name: Adding TF Output to summary
+        if: steps.plan.outcome == 'success' && steps.plan.outputs.TFPlanExitCode == 0
+        run: |
+          terraform output -no-color > /tmp/$${{ github.sha }}-$${{inputs.environment}}-output.txt
+          echo "<details><summary><h3>Expand for Terraform full output</summary></h3>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```tf' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/$${{ github.sha }}-$${{inputs.environment}}-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: archiving
+        if: steps.plan.outcome == 'success' && steps.plan.outputs.TFPlanExitCode == 2
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: error
+          name: "$${{ github.sha }}-$${{inputs.environment}}-infra-plan"
+          path: |
+            /tmp/$${{inputs.environment}}-infra-plan.txt
+            /tmp/$${{ github.sha }}-$${{inputs.environment}}-infra-plan

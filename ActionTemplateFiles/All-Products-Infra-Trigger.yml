@@ -1,0 +1,25 @@
+on:
+  workflow_dispatch:
+    inputs:
+      infratype:
+        type: choice
+        required: true
+        default: "All_Products_Account"
+        description: Select the Infra type to trigger
+        options:
+          - All_Products_Account
+          - All_Products_Application
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs: 
+
+#%{ for env in env_level_replace_val ~}
+
+  ${env.infrarepo}-Account:
+    if: github.event_name == 'workflow_dispatch' && (inputs.infratype == 'All_Products_Account')
+    uses: janavenkat15/FileMgmtRepo/.github/workflows/test.yml@main
+    secrets: inherit
+#%{ endfor ~}
