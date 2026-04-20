@@ -20,8 +20,6 @@ jobs:
 
   ${env.infrarepo}-Account:
     if: github.event_name == 'workflow_dispatch' && (inputs.infratype == 'All_Products_Account')
-    uses: janavenkat15/FileMgmtRepo/.github/workflows/test.yml@test
+    uses: janavenkat15/FileMgmtRepo/.github/workflows/test.yml@main
     secrets: inherit
-    with:
-      environment: "All"
 #%{ endfor ~}
