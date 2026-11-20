@@ -12,9 +12,9 @@ jobs:
         run: |
           echo "🚀 Hello from the target workflow!"
       
-      - name: Fail using github-script
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const core = require('@actions/core');
-            core.setFailed('Failing workflow simply.');
+      # - name: Fail using github-script
+      #   uses: actions/github-script@v7
+      #   with:
+      #     script: |
+      #       const core = require('@actions/core');
+      #       core.setFailed('Failing workflow simply.');
