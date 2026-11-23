@@ -1,6 +1,6 @@
 # Configure the GitHub Provider
 provider "github" {
-  token = "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"
+  token = "1123"
 }
 
 locals {
